@@ -1,0 +1,71 @@
+# Server configuration
+server:
+  port: 8090
+
+# Spring configuration  
+spring:
+  application:
+    name: newspulse-api
+  
+  # Redis configuration
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  
+  # Cache configuration
+  cache:
+    type: redis
+    redis:
+      time-to-live: 300000  # 5 minutes
+
+# Elasticsearch configuration
+elasticsearch:
+  host: ${ELASTICSEARCH_HOST:localhost}
+  port: ${ELASTICSEARCH_PORT:9200}
+  index:
+    articles: news_articles
+    trending: news_trending
+
+# Embedding service configuration
+embedding:
+  service:
+    url: ${EMBEDDING_SERVICE_URL:http://localhost:8000}
+
+# API configuration
+api:
+  trending:
+    default-limit: 20
+    max-limit: 100
+  search:
+    default-limit: 20
+    max-limit: 100
+    highlight-fragment-size: 150
+  recommendations:
+    default-limit: 10
+    max-limit: 50
+
+# Actuator configuration
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+
+# OpenAPI configuration
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operationsSorter: method
+
+# Logging
+logging:
+  level:
+    root: INFO
+    com.newspulse: DEBUG
+    org.elasticsearch: WARN
