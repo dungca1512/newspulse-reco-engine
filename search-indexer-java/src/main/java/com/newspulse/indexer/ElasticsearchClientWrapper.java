@@ -18,6 +18,10 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+
 /**
  * Elasticsearch client wrapper for news article indexing
  */
@@ -37,8 +41,13 @@ public class ElasticsearchClientWrapper implements AutoCloseable {
         this.restClient = RestClient.builder(
                 new HttpHost(host, port, "http")).build();
 
-        // Create transport with Jackson mapper
-        this.transport = new RestClientTransport(restClient, new JacksonJsonpMapper());
+        // Create ObjectMapper with Java 8 date/time support
+        ObjectMapper objectMapper = new ObjectMapper();
+        objectMapper.registerModule(new JavaTimeModule());
+        objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
+        // Create transport with configured Jackson mapper
+        this.transport = new RestClientTransport(restClient, new JacksonJsonpMapper(objectMapper));
 
         // Create API client
         this.client = new ElasticsearchClient(transport);

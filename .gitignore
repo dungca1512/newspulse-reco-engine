@@ -86,6 +86,7 @@ Thumbs.db
 # Data
 # =========================
 data/lake/
+data/checkpoints/
 *.parquet
 *.delta/
 logs/

@@ -39,6 +39,11 @@ services:
       - kafka_data:/var/lib/kafka/data
     networks:
       - newspulse-network
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server kafka:29092 --list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # ============================================
   # KAFKA UI - Web interface for Kafka
@@ -47,9 +52,10 @@ services:
     image: provectuslabs/kafka-ui:latest
     container_name: newspulse-kafka-ui
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     ports:
-      - "8080:8080"
+      - "8088:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: newspulse
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092

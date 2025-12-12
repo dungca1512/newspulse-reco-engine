@@ -6,6 +6,8 @@ server:
 spring:
   application:
     name: newspulse-api
+  main:
+    web-application-type: servlet
   
   # Redis configuration
   data:

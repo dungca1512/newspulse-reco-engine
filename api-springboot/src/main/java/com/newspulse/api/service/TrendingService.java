@@ -37,16 +37,17 @@ public class TrendingService {
      */
     @Cacheable(value = "trending", key = "#limit + '_' + #category")
     public List<TrendingTopic> getTrending(int limit, String category) throws IOException {
-        var queryBuilder = co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery.builder();
-
-        if (category != null && !category.isEmpty()) {
-            queryBuilder.filter(f -> f.term(t -> t.field("category").value(category)));
-        }
+        final String filterCategory = category;
 
         SearchResponse<Map> response = esClient.search(s -> s
                 .index(trendingIndex)
                 .size(limit)
-                .query(q -> q.bool(queryBuilder.build()))
+                .query(q -> {
+                    if (filterCategory != null && !filterCategory.isEmpty()) {
+                        return q.bool(b -> b.filter(f -> f.term(t -> t.field("category").value(filterCategory))));
+                    }
+                    return q.matchAll(m -> m);
+                })
                 .sort(so -> so.field(f -> f.field("trending_score").order(SortOrder.Desc))),
                 Map.class);
 

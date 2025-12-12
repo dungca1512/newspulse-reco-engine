@@ -33,17 +33,32 @@ object TopicClusterer extends App with LazyLogging {
   /**
    * Load articles with embeddings from Delta Lake
    */
-  def loadArticles(): DataFrame = {
+  def loadArticles(): Option[DataFrame] = {
     val embeddingPath = config.getString("clustering.delta.embedding-path")
     val timeWindowHours = config.getInt("clustering.time-window-hours")
     
     val cutoffTime = System.currentTimeMillis() - (timeWindowHours * 3600 * 1000L)
     
-    spark.read
-      .format("delta")
-      .load(embeddingPath)
-      .filter(col("crawlTime") > cutoffTime)
-      .filter(col("embedding").isNotNull)
+    // Check if Delta table exists
+    val deltaLogPath = new java.io.File(embeddingPath, "_delta_log")
+    if (!deltaLogPath.exists()) {
+      logger.warn(s"Delta table not found at $embeddingPath. Please run the ETL/embedding pipeline first to generate data.")
+      return None
+    }
+    
+    try {
+      Some(
+        spark.read
+          .format("delta")
+          .load(embeddingPath)
+          .filter(col("crawlTime") > cutoffTime)
+          .filter(col("embedding").isNotNull)
+      )
+    } catch {
+      case e: Exception =>
+        logger.error(s"Failed to load Delta table: ${e.getMessage}")
+        None
+    }
   }
   
   /**
@@ -177,30 +192,35 @@ object TopicClusterer extends App with LazyLogging {
    */
   def run(): Unit = {
     // Load articles
-    val articles = loadArticles()
-    val count = articles.count()
-    logger.info(s"Loaded $count articles for clustering")
-    
-    if (count < 10) {
-      logger.warn("Not enough articles for meaningful clustering")
-      return
+    loadArticles() match {
+      case None =>
+        logger.warn("No data available for clustering. Exiting.")
+        return
+      case Some(articles) =>
+        val count = articles.count()
+        logger.info(s"Loaded $count articles for clustering")
+        
+        if (count < 10) {
+          logger.warn("Not enough articles for meaningful clustering")
+          return
+        }
+        
+        // Prepare features
+        val prepared = prepareFeatures(articles)
+        
+        // Perform clustering
+        val clustered = clusterArticles(prepared)
+        
+        // Compute cluster statistics
+        val stats = computeClusterStats(clustered)
+        
+        // Log summary
+        val numClusters = stats.count()
+        logger.info(s"Created $numClusters clusters")
+        
+        // Save results
+        saveResults(clustered, stats)
     }
-    
-    // Prepare features
-    val prepared = prepareFeatures(articles)
-    
-    // Perform clustering
-    val clustered = clusterArticles(prepared)
-    
-    // Compute cluster statistics
-    val stats = computeClusterStats(clustered)
-    
-    // Log summary
-    val numClusters = stats.count()
-    logger.info(s"Created $numClusters clusters")
-    
-    // Save results
-    saveResults(clustered, stats)
   }
   
   // Run the clustering
