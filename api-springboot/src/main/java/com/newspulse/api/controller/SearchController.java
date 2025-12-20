@@ -28,6 +28,7 @@ public class SearchController {
 
     private final SearchService searchService;
     private final RecommendationService recommendationService;
+    private final com.newspulse.api.service.EmbeddingService embeddingService;
 
     @Value("${api.search.default-limit}")
     private int defaultLimit;
@@ -69,9 +70,8 @@ public class SearchController {
 
         log.info("Semantic search: text length={}, page={}", request.text().length(), page);
 
-        // Get embedding from service (simplified - in production, call embedding
-        // service)
-        float[] embedding = new float[768]; // Placeholder
+        // Get embedding from embedding service
+        float[] embedding = embeddingService.getEmbedding(request.text());
 
         SearchResult<Article> result = searchService.semanticSearch(embedding, page, resultLimit);
         return ResponseEntity.ok(result);
@@ -91,8 +91,8 @@ public class SearchController {
 
         log.info("Hybrid search: query='{}', page={}", q, page);
 
-        // Get embedding for query (simplified)
-        float[] embedding = new float[768]; // Placeholder
+        // Get embedding from embedding service
+        float[] embedding = embeddingService.getEmbedding(q);
 
         SearchResult<Article> result = searchService.hybridSearch(q, embedding, page, resultLimit);
         return ResponseEntity.ok(result);

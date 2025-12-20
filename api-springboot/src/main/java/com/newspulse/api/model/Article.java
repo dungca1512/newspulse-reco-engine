@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.io.Serializable;
 import java.time.Instant;
 import java.util.List;
 
@@ -16,7 +17,9 @@ import java.util.List;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class Article {
+public class Article implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private String id;
     private String url;
