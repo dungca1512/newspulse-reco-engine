@@ -4,8 +4,11 @@
 
 set -e
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_DIR"
+
+# Create directories if not exist
+mkdir -p logs pids
 
 # Colors for output
 RED='\033[0;31m'
@@ -29,7 +32,7 @@ wait_for_service() {
     local service=$3
     local max_attempts=30
     local attempt=1
-    
+
     echo -n "Waiting for $service..."
     while ! nc -z $host $port 2>/dev/null; do
         if [ $attempt -ge $max_attempts ]; then
@@ -46,7 +49,7 @@ wait_for_service() {
 # ========================================
 # Step 1: Start Infrastructure (Docker)
 # ========================================
-echo -e "\n${YELLOW}[1/7] Starting Infrastructure (Docker)...${NC}"
+echo -e "\n${YELLOW}[1/10] Starting Infrastructure (Docker)...${NC}"
 docker compose up -d
 
 wait_for_service localhost 9092 "Kafka"
@@ -56,7 +59,7 @@ wait_for_service localhost 6379 "Redis"
 # ========================================
 # Step 2: Create Elasticsearch Indices
 # ========================================
-echo -e "\n${YELLOW}[2/7] Creating Elasticsearch Indices...${NC}"
+echo -e "\n${YELLOW}[2/10] Creating Elasticsearch Indices...${NC}"
 
 # Create news_articles index if not exists
 curl -s -X PUT "http://localhost:9200/news_articles" -H "Content-Type: application/json" -d '{
@@ -114,7 +117,7 @@ echo "  - news_trending index created/exists"
 # ========================================
 # Step 3: Start API Server (Spring Boot)
 # ========================================
-echo -e "\n${YELLOW}[3/7] Starting API Server (Spring Boot)...${NC}"
+echo -e "\n${YELLOW}[3/10] Starting API Server (Spring Boot)...${NC}"
 cd api-springboot
 nohup mvn spring-boot:run > ../logs/api-springboot.log 2>&1 &
 echo $! > ../pids/api-springboot.pid
@@ -124,7 +127,7 @@ echo "  - API Server starting on port 8090 (PID: $(cat pids/api-springboot.pid))
 # ========================================
 # Step 4: Start Embedding Service (Python)
 # ========================================
-echo -e "\n${YELLOW}[4/7] Starting Embedding Service (Python)...${NC}"
+echo -e "\n${YELLOW}[4/10] Starting Embedding Service (Python)...${NC}"
 cd embedding-service-python
 nohup uvicorn src.main:app --host 0.0.0.0 --port 8000 > ../logs/embedding-api.log 2>&1 &
 echo $! > ../pids/embedding-api.pid
@@ -139,7 +142,7 @@ echo "  - Embedding Kafka Consumer started (PID: $(cat pids/embedding-consumer.p
 # ========================================
 # Step 5: Start ETL Spark Pipeline
 # ========================================
-echo -e "\n${YELLOW}[5/7] Starting ETL Spark Pipeline...${NC}"
+echo -e "\n${YELLOW}[5/10] Starting ETL Spark Pipeline...${NC}"
 cd etl-spark-scala
 nohup sbt run > ../logs/etl-spark.log 2>&1 &
 echo $! > ../pids/etl-spark.pid
@@ -147,9 +150,19 @@ cd ..
 echo "  - ETL Spark starting (PID: $(cat pids/etl-spark.pid))"
 
 # ========================================
-# Step 6: Start Search Indexer (Java)
+# Step 6: Start Embedding ETL (Kafka to Delta Lake)
 # ========================================
-echo -e "\n${YELLOW}[6/7] Starting Search Indexer (Java)...${NC}"
+echo -e "\n${YELLOW}[6/10] Starting Embedding ETL Pipeline...${NC}"
+cd etl-spark-scala
+nohup sbt "runMain com.newspulse.etl.EmbeddingETL" > ../logs/embedding-etl.log 2>&1 &
+echo $! > ../pids/embedding-etl.pid
+cd ..
+echo "  - Embedding ETL starting (PID: $(cat pids/embedding-etl.pid))"
+
+# ========================================
+# Step 7: Start Search Indexer (Java)
+# ========================================
+echo -e "\n${YELLOW}[7/10] Starting Search Indexer (Java)...${NC}"
 cd search-indexer-java
 # Build if needed
 if [ ! -f target/search-indexer-*.jar ]; then
@@ -162,14 +175,34 @@ cd ..
 echo "  - Search Indexer started (PID: $(cat pids/search-indexer.pid))"
 
 # ========================================
-# Step 7: Start Crawler (Scala)
+# Step 8: Start Crawler (Scala)
 # ========================================
-echo -e "\n${YELLOW}[7/7] Starting Crawler...${NC}"
+echo -e "\n${YELLOW}[8/10] Starting Crawler...${NC}"
 cd crawler-scala
 nohup sbt run > ../logs/crawler.log 2>&1 &
 echo $! > ../pids/crawler.pid
 cd ..
 echo "  - Crawler started (PID: $(cat pids/crawler.pid))"
+
+# ========================================
+# Step 9: Start Topic Clustering (Scala)
+# ========================================
+echo -e "\n${YELLOW}[9/10] Starting Topic Clustering...${NC}"
+cd topic-clustering-scala
+nohup sbt run > ../logs/topic-clustering.log 2>&1 &
+echo $! > ../pids/topic-clustering.pid
+cd ..
+echo "  - Topic Clustering started (PID: $(cat pids/topic-clustering.pid))"
+
+# ========================================
+# Step 10: Start Trending Engine (Scala)
+# ========================================
+echo -e "\n${YELLOW}[10/10] Starting Trending Engine...${NC}"
+cd trending-engine-scala
+nohup sbt run > ../logs/trending-engine.log 2>&1 &
+echo $! > ../pids/trending-engine.pid
+cd ..
+echo "  - Trending Engine started (PID: $(cat pids/trending-engine.pid))"
 
 # ========================================
 # Summary
@@ -185,11 +218,23 @@ echo "  - Embedding Service:  http://localhost:8000"
 echo "  - Elasticsearch:      http://localhost:9200"
 echo "  - Kafka UI:           http://localhost:8088"
 echo ""
+echo "Data Pipeline:"
+echo "  - Crawler -> Kafka (news_raw)"
+echo "  - ETL -> Kafka (news_cleaned) + Delta Lake (clean)"
+echo "  - Embedding Service -> Kafka (news_embedding)"
+echo "  - Embedding ETL -> Delta Lake (embedding)"
+echo "  - Topic Clustering -> Delta Lake (clusters)"
+echo "  - Trending Engine -> Delta Lake (trending)"
+echo ""
 echo "Logs:"
-echo "  - API:        logs/api-springboot.log"
-echo "  - Embedding:  logs/embedding-api.log"
-echo "  - ETL:        logs/etl-spark.log"
-echo "  - Indexer:    logs/search-indexer.log"
-echo "  - Crawler:    logs/crawler.log"
+echo "  - API:              logs/api-springboot.log"
+echo "  - Embedding API:    logs/embedding-api.log"
+echo "  - Embedding Kafka:  logs/embedding-consumer.log"
+echo "  - ETL:              logs/etl-spark.log"
+echo "  - Embedding ETL:    logs/embedding-etl.log"
+echo "  - Indexer:          logs/search-indexer.log"
+echo "  - Crawler:          logs/crawler.log"
+echo "  - Clustering:       logs/topic-clustering.log"
+echo "  - Trending:         logs/trending-engine.log"
 echo ""
 echo "Use './scripts/stop-all.sh' to stop all services"

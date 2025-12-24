@@ -4,6 +4,7 @@ import com.newspulse.crawler.model.Article
 import org.jsoup.nodes.Document
 
 import java.time.{Instant, LocalDateTime, ZoneId}
+import java.time.format.DateTimeFormatter
 import scala.jdk.CollectionConverters._
 import scala.util.Try
 
@@ -20,7 +21,7 @@ class Kenh14Crawler(
   override def getArticleUrls(categoryUrl: String): List[String] =
     fetchDocument(categoryUrl) match
       case scala.util.Success(doc) =>
-        doc.select("h3.knswli-title a, h2.klwh-title a, a.knswli-thumb")
+        doc.select("h3.knswli-title a, h2.klwh-title a, a.knswli-thumb, h3.kds-title a")
           .asScala
           .map(_.attr("href"))
           .map(absoluteUrl)
@@ -36,24 +37,26 @@ class Kenh14Crawler(
     fetchDocument(url) match
       case scala.util.Success(doc) =>
         Try {
-          val title = doc.select("h1.kbwc-title").text()
-          val description = Option(doc.select("h2.knc-sapo").text()).filter(_.nonEmpty)
+          val title = doc.select("h1.kbwc-title, h1.kcn-title").text()
+          val description = Option(doc.select("h2.knc-sapo, h2.kcn-sapo, meta[name=description]").first())
+            .map(el => if (el.tagName() == "meta") el.attr("content") else el.text())
+            .filter(_.nonEmpty)
           
-          val contentElements = doc.select("div.knc-content p")
+          val contentElements = doc.select("div.knc-content p, div.kcn-content p")
           val content = contentElements.asScala
             .map(_.text())
             .filter(_.nonEmpty)
             .mkString(" ")
           
-          val author = Option(doc.select("span.kbwcm-author, p.knc-author").first())
+          val author = Option(doc.select("span.kbwcm-author, p.knc-author, div.author-name").first())
             .map(_.text())
             .filter(_.nonEmpty)
           
-          val category = Option(doc.select("ul.kbwcm-breadcrumb li a").asScala.drop(1).headOption)
+          val category = Option(doc.select("ul.kbwcm-breadcrumb li a, ul.kcn-breadcrumb li a").asScala.drop(1).headOption)
             .flatten
             .map(_.text())
           
-          val tags = doc.select("div.knc-tags a")
+          val tags = doc.select("div.knc-tags a, div.kcn-tags-new a")
             .asScala
             .map(_.text().trim)
             .filter(_.nonEmpty)
@@ -80,6 +83,7 @@ class Kenh14Crawler(
               crawlTime = Instant.now()
             ))
           else
+            logger.warn(s"Could not parse title or content for $url. Title found: ${title.nonEmpty}, Content empty: ${content.isEmpty}")
             None
         }.toOption.flatten
         
@@ -89,16 +93,15 @@ class Kenh14Crawler(
   
   private def parsePublishTime(doc: Document): Option[Instant] =
     Try {
-      val timeStr = doc.select("span.kbwcm-time").text()
-      val pattern = """(\d{1,2}):(\d{2})\s+(\d{1,2})/(\d{1,2})/(\d{4})""".r
-      
-      timeStr match
-        case pattern(hour, minute, day, month, year) =>
-          val dateTime = LocalDateTime.of(
-            year.toInt, month.toInt, day.toInt,
-            hour.toInt, minute.toInt
-          )
-          Some(dateTime.atZone(ZoneId.of("Asia/Ho_Chi_Minh")).toInstant)
-        case _ =>
-          None
+      val timeStr = doc.select("span.kbwcm-time, span.kcn-time").attr("title")
+      // Format: 2024-07-20 10:30:00
+      if (timeStr.nonEmpty) {
+        val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+        val dateTime = LocalDateTime.parse(timeStr, formatter)
+        Some(dateTime.atZone(ZoneId.of("Asia/Ho_Chi_Minh")).toInstant)
+      } else {
+        Option(doc.select("meta[property=article:published_time]").attr("content"))
+          .filter(_.nonEmpty)
+          .map(Instant.parse)
+      }
     }.toOption.flatten

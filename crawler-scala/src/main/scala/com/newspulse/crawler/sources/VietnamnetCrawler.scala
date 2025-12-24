@@ -4,6 +4,7 @@ import com.newspulse.crawler.model.Article
 import org.jsoup.nodes.Document
 
 import java.time.{Instant, LocalDateTime, ZoneId}
+import java.time.format.DateTimeFormatter
 import scala.jdk.CollectionConverters._
 import scala.util.Try
 
@@ -20,7 +21,8 @@ class VietnamnetCrawler(
   override def getArticleUrls(categoryUrl: String): List[String] =
     fetchDocument(categoryUrl) match
       case scala.util.Success(doc) =>
-        doc.select("h3.title a, h2.title a, a.thumb")
+        // Updated selectors for article links
+        doc.select("h2.vnn-title a, h3.vnn-title a, a.vertical-sub-news__title")
           .asScala
           .map(_.attr("href"))
           .map(absoluteUrl)
@@ -36,24 +38,24 @@ class VietnamnetCrawler(
     fetchDocument(url) match
       case scala.util.Success(doc) =>
         Try {
-          val title = doc.select("h1.content-detail-title").text()
-          val description = Option(doc.select("h2.content-detail-sapo").text()).filter(_.nonEmpty)
+          val title = doc.select("h1.content-title, h1.article-title").text()
+          val description = Option(doc.select("div.content-sapo h2, p.article-sapo").text()).filter(_.nonEmpty)
           
-          val contentElements = doc.select("div.maincontent p")
+          val contentElements = doc.select("div.main-content p, div.article-body p")
           val content = contentElements.asScala
             .map(_.text())
             .filter(_.nonEmpty)
             .mkString(" ")
           
-          val author = Option(doc.select("p.author-name, span.author-name").first())
+          val author = Option(doc.select("div.content-author-name a, div.author-info__name").first())
             .map(_.text())
             .filter(_.nonEmpty)
           
-          val category = Option(doc.select("ul.breadcrumb li a").asScala.drop(1).headOption)
+          val category = Option(doc.select("div.feature-box a.feature-box__title, ul.breadcrumb__links li a").asScala.drop(1).headOption)
             .flatten
             .map(_.text())
           
-          val tags = doc.select("div.tags-detail a")
+          val tags = doc.select("div.related-tags a, ul.tags-list__items li a")
             .asScala
             .map(_.text().trim)
             .filter(_.nonEmpty)
@@ -80,6 +82,7 @@ class VietnamnetCrawler(
               crawlTime = Instant.now()
             ))
           else
+            logger.warn(s"Could not parse title or content for $url. Title found: ${title.nonEmpty}")
             None
         }.toOption.flatten
         
@@ -89,16 +92,19 @@ class VietnamnetCrawler(
   
   private def parsePublishTime(doc: Document): Option[Instant] =
     Try {
-      val timeStr = doc.select("span.bread-crumb-detail__time").text()
-      val pattern = """(\d{1,2}):(\d{2})\s+(\d{1,2})/(\d{1,2})/(\d{4})""".r
+      val timeStr = doc.select("div.content-date-time, div.article-publish-date__time").text()
+      // Format: 19/07/2024 14:00 (GMT+07:00)
+      val pattern = """(\d{2})/(\d{2})/(\d{4})\s(\d{2}):(\d{2})""".r
       
       timeStr match
-        case pattern(hour, minute, day, month, year) =>
+        case pattern(day, month, year, hour, minute) =>
           val dateTime = LocalDateTime.of(
             year.toInt, month.toInt, day.toInt,
             hour.toInt, minute.toInt
           )
           Some(dateTime.atZone(ZoneId.of("Asia/Ho_Chi_Minh")).toInstant)
         case _ =>
-          None
+          Option(doc.select("meta[property=article:published_time]").attr("content"))
+            .filter(_.nonEmpty)
+            .map(Instant.parse)
     }.toOption.flatten

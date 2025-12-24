@@ -4,6 +4,7 @@ import com.newspulse.crawler.model.Article
 import org.jsoup.nodes.Document
 
 import java.time.{Instant, LocalDateTime, ZoneId}
+import java.time.format.DateTimeFormatter
 import scala.jdk.CollectionConverters._
 import scala.util.Try
 
@@ -20,11 +21,12 @@ class ThanhNienCrawler(
   override def getArticleUrls(categoryUrl: String): List[String] =
     fetchDocument(categoryUrl) match
       case scala.util.Success(doc) =>
-        doc.select("h2.story__title a, h3.story__title a, a.story__thumb")
+        // Updated selectors for article links, more specific to avoid ads/non-news
+        doc.select("article.story a[href*='.html'], div.zone--timeline article a[href*='.html']")
           .asScala
           .map(_.attr("href"))
           .map(absoluteUrl)
-          .filter(_.contains(".html"))
+          .filter(_.matches(".*/post\\d+\\.html$")) // Ensure it's a post URL
           .toList
           .distinct
           .take(50)
@@ -36,24 +38,26 @@ class ThanhNienCrawler(
     fetchDocument(url) match
       case scala.util.Success(doc) =>
         Try {
-          val title = doc.select("h1.detail__title").text()
-          val description = Option(doc.select("h2.detail__summary").text()).filter(_.nonEmpty)
+          val title = doc.select("h1.detail__title, h1.article-title").text()
+          val description = Option(doc.select("h2.detail__summary, div.sapo, meta[name=description]").first())
+            .map { element => if (element.tagName() == "meta") element.attr("content") else element.text() }
+            .filter(_.nonEmpty)
           
-          val contentElements = doc.select("div.detail__content p")
+          val contentElements = doc.select("div.detail__content div.cms-body > p, div#abody p, div.article-content p")
           val content = contentElements.asScala
             .map(_.text())
             .filter(_.nonEmpty)
             .mkString(" ")
           
-          val author = Option(doc.select("a.detail__author, div.detail__author-name").first())
+          val author = Option(doc.select("a.detail__author, div.detail__author-name, div.author-info__name").first())
             .map(_.text())
             .filter(_.nonEmpty)
           
-          val category = Option(doc.select("ul.breadcrumb li a").asScala.drop(1).headOption)
+          val category = Option(doc.select("ul.breadcrumb li a, div.breadcrumbs a").asScala.drop(1).headOption)
             .flatten
             .map(_.text())
           
-          val tags = doc.select("div.detail__tags a")
+          val tags = doc.select("div.detail__tags a, div.tags a")
             .asScala
             .map(_.text().trim)
             .filter(_.nonEmpty)
@@ -80,6 +84,7 @@ class ThanhNienCrawler(
               crawlTime = Instant.now()
             ))
           else
+            logger.warn(s"Could not parse title or content for $url. Title found: ${title.nonEmpty}")
             None
         }.toOption.flatten
         
@@ -89,9 +94,22 @@ class ThanhNienCrawler(
   
   private def parsePublishTime(doc: Document): Option[Instant] =
     Try {
-      val timeStr = doc.select("div.detail__meta time").attr("datetime")
+      // ThanhNien uses a 'datetime' attribute in a <time> tag
+      val timeStr = doc.select("div.detail__meta time, time.article-meta-time").attr("datetime")
       if timeStr.nonEmpty then
         Some(Instant.parse(timeStr))
       else
-        None
+        // Fallback for other formats
+        val timeText = doc.select("div.detail__meta, span.meta-time").text()
+        // Format: 14:30 - 19/12/2025
+        val pattern = """(\d{2}):(\d{2})\s-\s(\d{2})/(\d{2})/(\d{4})""".r
+        timeText match {
+          case pattern(hour, minute, day, month, year) =>
+            val dt = LocalDateTime.of(year.toInt, month.toInt, day.toInt, hour.toInt, minute.toInt)
+            Some(dt.atZone(ZoneId.of("Asia/Ho_Chi_Minh")).toInstant)
+          case _ =>
+            Option(doc.select("meta[property=article:published_time]").attr("content"))
+              .filter(_.nonEmpty)
+              .map(Instant.parse)
+        }
     }.toOption.flatten

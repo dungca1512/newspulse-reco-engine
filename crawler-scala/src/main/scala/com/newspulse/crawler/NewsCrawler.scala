@@ -36,7 +36,8 @@ object NewsCrawler extends LazyLogging:
       categories = List("/", "/thoi-su", "/kinh-doanh", "/the-gioi")
     ),
     new CafeFCrawler(
-      categories = List("/", "/tai-chinh-ngan-hang.chn", "/chung-khoan.chn")
+      // [FIXED] Updated category path for CafeF
+      categories = List("/", "/tai-chinh-ngan-hang.chn", "/thi-truong-chung-khoan.chn")
     ),
     new Kenh14Crawler(
       categories = List("/", "/star.chn", "/doi-song.chn")
@@ -68,8 +69,8 @@ object NewsCrawler extends LazyLogging:
         else
           logger.warn(s"No articles found from ${crawler.sourceName}")
           
-        // Rate limiting between sources
-        Thread.sleep(2000)
+        // [FIXED] Increased delay to avoid rate limiting (429 errors)
+        Thread.sleep(3000)
       catch
         case e: Exception =>
           errorCount += 1

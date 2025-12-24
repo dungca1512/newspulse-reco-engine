@@ -37,8 +37,11 @@ stop_service "API Server" "pids/api-springboot.pid"
 stop_service "Embedding API" "pids/embedding-api.pid"
 stop_service "Embedding Consumer" "pids/embedding-consumer.pid"
 stop_service "ETL Spark" "pids/etl-spark.pid"
+stop_service "Embedding ETL" "pids/embedding-etl.pid"
 stop_service "Search Indexer" "pids/search-indexer.pid"
 stop_service "Crawler" "pids/crawler.pid"
+stop_service "Topic Clustering" "pids/topic-clustering.pid"
+stop_service "Trending Engine" "pids/trending-engine.pid"
 
 # Kill any remaining Java/Python processes for safety
 echo -e "\n${YELLOW}Cleaning up any remaining processes...${NC}"

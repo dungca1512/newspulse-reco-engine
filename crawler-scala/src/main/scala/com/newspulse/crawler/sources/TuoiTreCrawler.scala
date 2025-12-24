@@ -4,6 +4,7 @@ import com.newspulse.crawler.model.Article
 import org.jsoup.nodes.Document
 
 import java.time.{Instant, LocalDateTime, ZoneId}
+import java.time.format.DateTimeFormatter
 import scala.jdk.CollectionConverters._
 import scala.util.Try
 
@@ -20,7 +21,7 @@ class TuoiTreCrawler(
   override def getArticleUrls(categoryUrl: String): List[String] =
     fetchDocument(categoryUrl) match
       case scala.util.Success(doc) =>
-        doc.select("h3.title-name a, h2.title-name a, a.box-category-link-title")
+        doc.select("h3.title-name a, h2.title-name a, a.box-category-link-title, h3.box-title-text a")
           .asScala
           .map(_.attr("href"))
           .map(absoluteUrl)
@@ -45,14 +46,15 @@ class TuoiTreCrawler(
             .filter(!_.contains("Xem thêm"))
             .mkString(" ")
           
-          val author = Option(doc.select("div.author-info a, span.name-author").first())
+          val author = Option(doc.select("div.author-info a, span.name-author, div.author").first())
             .map(_.text())
             .filter(_.nonEmpty)
           
-          val category = Option(doc.select("div.bread-crumb a").get(1))
+          val category = Option(doc.select("div.bread-crumb a, ul.breadcrumb li a").asScala.drop(1).headOption)
+            .flatten
             .map(_.text())
           
-          val tags = doc.select("div.tags-container a")
+          val tags = doc.select("div.tags-container a, div.tags a")
             .asScala
             .map(_.text().trim)
             .filter(_.nonEmpty)
@@ -79,6 +81,7 @@ class TuoiTreCrawler(
               crawlTime = Instant.now()
             ))
           else
+            logger.warn(s"Could not parse title or content for $url. Title found: ${title.nonEmpty}")
             None
         }.toOption.flatten
         
@@ -88,7 +91,7 @@ class TuoiTreCrawler(
   
   private def parsePublishTime(doc: Document): Option[Instant] =
     Try {
-      val timeStr = doc.select("div.date-time").text()
+      val timeStr = doc.select("div.date-time, span.date-time").text()
       // Format: "10/12/2024 15:30 GMT+7"
       val pattern = """(\d{1,2})/(\d{1,2})/(\d{4})\s+(\d{1,2}):(\d{2})""".r
       
@@ -100,5 +103,6 @@ class TuoiTreCrawler(
           )
           Some(dateTime.atZone(ZoneId.of("Asia/Ho_Chi_Minh")).toInstant)
         case _ =>
-          None
+          Option(doc.select("meta[property=article:published_time]").attr("content"))
+            .map(Instant.parse)
     }.toOption.flatten

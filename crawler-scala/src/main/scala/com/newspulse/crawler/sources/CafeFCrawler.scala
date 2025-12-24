@@ -4,6 +4,7 @@ import com.newspulse.crawler.model.Article
 import org.jsoup.nodes.Document
 
 import java.time.{Instant, LocalDateTime, ZoneId}
+import java.time.format.DateTimeFormatter
 import scala.jdk.CollectionConverters._
 import scala.util.Try
 
@@ -20,7 +21,7 @@ class CafeFCrawler(
   override def getArticleUrls(categoryUrl: String): List[String] =
     fetchDocument(categoryUrl) match
       case scala.util.Success(doc) =>
-        doc.select("h3 a, h2 a")
+        doc.select("h3 a, h2 a, div.avatar a")
           .asScala
           .map(_.attr("href"))
           .map(absoluteUrl)
@@ -36,24 +37,24 @@ class CafeFCrawler(
     fetchDocument(url) match
       case scala.util.Success(doc) =>
         Try {
-          val title = doc.select("h1.title").text()
-          val description = Option(doc.select("h2.sapo").text()).filter(_.nonEmpty)
+          val title = doc.select("h1.title, h1.detail-title").text()
+          val description = Option(doc.select("h2.sapo, h2.detail-sapo").text()).filter(_.nonEmpty)
           
-          val contentElements = doc.select("div.detail-content p")
+          val contentElements = doc.select("div.detail-content p, div#mainContent p")
           val content = contentElements.asScala
             .map(_.text())
             .filter(_.nonEmpty)
             .mkString(" ")
           
-          val author = Option(doc.select("p.author").first())
+          val author = Option(doc.select("p.author, div.author, span.author").first())
             .map(_.text())
             .filter(_.nonEmpty)
           
-          val category = Option(doc.select("div.breadcrumb a").asScala.drop(1).headOption)
+          val category = Option(doc.select("div.breadcrumb a, ul.breadcrumb li a").asScala.drop(1).headOption)
             .flatten
             .map(_.text())
           
-          val tags = doc.select("div.tags a")
+          val tags = doc.select("div.tags a, div.tag-cloud a")
             .asScala
             .map(_.text().trim)
             .filter(_.nonEmpty)
@@ -80,6 +81,7 @@ class CafeFCrawler(
               crawlTime = Instant.now()
             ))
           else
+            logger.warn(s"Could not parse title or content for $url. Title found: ${title.nonEmpty}")
             None
         }.toOption.flatten
         
@@ -89,7 +91,8 @@ class CafeFCrawler(
   
   private def parsePublishTime(doc: Document): Option[Instant] =
     Try {
-      val timeStr = doc.select("span.pdate").text()
+      val timeStr = doc.select("span.pdate, span.date, time.op-published-time").text()
+      // Format: 10/12/2024 15:30
       val pattern = """(\d{1,2})/(\d{1,2})/(\d{4})\s+(\d{1,2}):(\d{2})""".r
       
       timeStr match
@@ -100,5 +103,6 @@ class CafeFCrawler(
           )
           Some(dateTime.atZone(ZoneId.of("Asia/Ho_Chi_Minh")).toInstant)
         case _ =>
-          None
+          Option(doc.select("meta[property=article:published_time]").attr("content"))
+            .map(Instant.parse)
     }.toOption.flatten
